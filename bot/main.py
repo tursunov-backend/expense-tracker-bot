@@ -7,44 +7,35 @@ from telegram.ext import (
 )
 
 from .config import settings
-from .config.constants import RegisterationStates
-from .handlers import (
-    commands,
-    messages,
-)
+from .handlers import messages, commands
+from .db import seed_categories
 
 
-def main() -> None:
+def main():
+    seed_categories()
+
     updater = Updater(settings.BOT_TOKEN)
     dispatcher = updater.dispatcher
 
-    # Command Handlers
     dispatcher.add_handler(CommandHandler("start", commands.start_command))
 
-    # Conversation Handlers
-    dispatcher.add_handler(
-        ConversationHandler(
-            entry_points=[
-                MessageHandler(Filters.text("Ro'yxatdan o'tish"), messages.ask_name)
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(Filters.text, messages.menu_router)],
+        states={
+            messages.SET_NAME: [MessageHandler(Filters.text, messages.set_name)],
+            messages.SET_PHONE: [MessageHandler(Filters.contact, messages.set_phone)],
+            messages.SET_LOCATION: [
+                MessageHandler(Filters.location, messages.set_location)
             ],
-            states={
-                RegisterationStates.SET_NAME: [
-                    MessageHandler(Filters.text, messages.set_name)
-                ],
-                RegisterationStates.SET_PHONE: [
-                    MessageHandler(Filters.contact, messages.set_phone)
-                ],
-                RegisterationStates.SET_LOCATION: [
-                    MessageHandler(Filters.location, messages.set_location)
-                ],
-                RegisterationStates.CONFIRM: [
-                    MessageHandler(Filters.text("Tasdiqlash"), messages.register),
-                    MessageHandler(Filters.text("Qayta Boshlash"), messages.ask_name),
-                ],
-            },
-            fallbacks=[CommandHandler("cancel", commands.start_command)],
-        )
+            messages.SET_CATEGORY: [
+                MessageHandler(Filters.text, messages.set_category)
+            ],
+            messages.SET_AMOUNT: [MessageHandler(Filters.text, messages.set_amount)],
+        },
+        fallbacks=[],
     )
+
+    dispatcher.add_handler(conv_handler)
 
     updater.start_polling()
     updater.idle()

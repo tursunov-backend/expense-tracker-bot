@@ -4,9 +4,11 @@ from telegram.ext import CallbackContext
 
 def start_command(update: Update, context: CallbackContext):
     update.message.reply_text(
-        "Assalomu alaykum, foydalanish uchun ro'yxatdan o'ting.",
+        "Assalomu alaykum 👋",
         reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton("Ro'yxatdan o'tish")]],
+            [
+                [KeyboardButton("Ro'yxatdan o'tish")],
+            ],
             resize_keyboard=True,
         ),
     )

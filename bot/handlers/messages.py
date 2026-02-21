@@ -1,46 +1,82 @@
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import CallbackContext, ConversationHandler
 
-from ..config.constants import RegisterationStates, ExpenseStates
 from ..db import (
     add_user,
-    get_categories_from_db,
+    is_user_registered,
+    get_categories,
     get_category_by_name,
-    add_expense_to_db,
+    add_expense,
+    get_total_expense,
+    get_expenses_by_category,
 )
 
+SET_NAME, SET_PHONE, SET_LOCATION, SET_CATEGORY, SET_AMOUNT = range(5)
 
-# ================= REGISTRATION =================
 
-def ask_name(update: Update, context: CallbackContext):
-    update.message.reply_text("Ismingizni yozing:")
-    return RegisterationStates.SET_NAME
+def main_menu(update: Update):
+    update.message.reply_text(
+        "Menyu 👇",
+        reply_markup=ReplyKeyboardMarkup(
+            [["Xarajat qoshish"], ["Xarajatlarim"]], resize_keyboard=True
+        ),
+    )
+
+
+def menu_router(update: Update, context: CallbackContext):
+    text = update.message.text
+
+    if text == "Ro'yxatdan o'tish":
+        update.message.reply_text("Ismingizni yozing:")
+        return SET_NAME
+
+    if text == "Xarajat qoshish":
+        if not is_user_registered(update.message.from_user.id):
+            update.message.reply_text("Avval ro'yxatdan o'ting ❗")
+            return ConversationHandler.END
+
+        keyboard = [[KeyboardButton(c["name"])] for c in get_categories()]
+        update.message.reply_text(
+            "Kategoriya tanlang:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        )
+        return SET_CATEGORY
+
+    if text == "Xarajatlarim":
+        total = get_total_expense(update.message.from_user.id)
+        data = get_expenses_by_category(update.message.from_user.id)
+
+        msg = f"💰 Umumiy: {total:,} so'm\n\n"
+        for k, v in data.items():
+            msg += f"• {k}: {v:,} so'm\n"
+
+        update.message.reply_text(msg)
+        main_menu(update)
+        return ConversationHandler.END
+
+    return ConversationHandler.END
 
 
 def set_name(update: Update, context: CallbackContext):
     context.user_data["name"] = update.message.text
-
     update.message.reply_text(
-        "Telefon raqamingizni yuboring:",
+        "Telefon raqam yuboring:",
         reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("Telefon raqam", request_contact=True)]],
-            resize_keyboard=True,
+            [[KeyboardButton("Telefon", request_contact=True)]], resize_keyboard=True
         ),
     )
-    return RegisterationStates.SET_PHONE
+    return SET_PHONE
 
 
 def set_phone(update: Update, context: CallbackContext):
     context.user_data["phone"] = update.message.contact.phone_number
-
     update.message.reply_text(
         "Lokatsiya yuboring:",
         reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("Lokatsiya yuborish", request_location=True)]],
-            resize_keyboard=True,
+            [[KeyboardButton("Lokatsiya", request_location=True)]], resize_keyboard=True
         ),
     )
-    return RegisterationStates.SET_LOCATION
+    return SET_LOCATION
 
 
 def set_location(update: Update, context: CallbackContext):
@@ -49,85 +85,39 @@ def set_location(update: Update, context: CallbackContext):
         "lon": update.message.location.longitude,
     }
 
-    update.message.reply_text(
-        "Tasdiqlaysizmi?",
-        reply_markup=ReplyKeyboardMarkup(
-            [["Tasdiqlash"], ["Qayta boshlash"]],
-            resize_keyboard=True,
-        ),
-    )
-    return RegisterationStates.CONFIRM
-
-
-def register(update: Update, context: CallbackContext):
     data = context.user_data
     data["telegram_id"] = update.message.from_user.id
     data["chat_id"] = update.message.chat.id
 
     add_user(data)
 
-    update.message.reply_text(
-        "Siz ro‘yxatdan o‘tdingiz ✅",
-        reply_markup=ReplyKeyboardMarkup(
-            [["Xarajat qoshish"]],
-            resize_keyboard=True,
-        ),
-    )
+    update.message.reply_text("Ro'yxatdan o'tdingiz ✅")
 
     context.user_data.clear()
+    main_menu(update)
     return ConversationHandler.END
 
 
-# ================= EXPENSE =================
+def set_category(update: Update, context: CallbackContext):
+    cat = get_category_by_name(update.message.text)
+    if not cat:
+        return SET_CATEGORY
 
-def expense_start(update: Update, context: CallbackContext):
-    print("EXPENSE START")  # tekshiruv uchun
-
-    categories = get_categories_from_db()
-    keyboard = [[KeyboardButton(cat["name"])] for cat in categories]
-
-    update.message.reply_text(
-        "Qaysi kategoriyaga qoshmoqchisiz?",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-    )
-
-    return ExpenseStates.SET_CATEGORY
-
-
-def set_expense_category(update: Update, context: CallbackContext):
-    name = update.message.text.strip()
-    category = get_category_by_name(name)
-
-    if not category:
-        update.message.reply_text("Noto‘g‘ri kategoriya, qayta tanlang")
-        return ExpenseStates.SET_CATEGORY
-
-    context.user_data["category_id"] = category.doc_id
+    context.user_data["category_id"] = cat.doc_id
     update.message.reply_text("Summani kiriting:")
-    return ExpenseStates.SET_AMOUNT
+    return SET_AMOUNT
 
 
-def set_expense_amount(update: Update, context: CallbackContext):
-    text = update.message.text.strip()
+def set_amount(update: Update, context: CallbackContext):
+    if not update.message.text.isdigit():
+        return SET_AMOUNT
 
-    if not text.isdigit():
-        update.message.reply_text("Faqat raqam kiriting!")
-        return ExpenseStates.SET_AMOUNT
-
-    add_expense_to_db(
-        user_id=update.message.from_user.id,
-        title="Xarajat",
-        amount=int(text),
-        category_id=context.user_data["category_id"],
+    add_expense(
+        update.message.from_user.id,
+        int(update.message.text),
+        context.user_data["category_id"],
     )
-
-    update.message.reply_text(
-        "Xarajat muvaffaqiyatli qo‘shildi ✅",
-        reply_markup=ReplyKeyboardMarkup(
-            [["Xarajat qoshish"]],
-            resize_keyboard=True,
-        ),
-    )
-
+    update.message.reply_text("Xarajat qo'shildi ✅")
     context.user_data.clear()
+    main_menu(update)
     return ConversationHandler.END
